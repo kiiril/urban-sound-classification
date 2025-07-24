@@ -12,7 +12,7 @@ os.environ['TORCH_HOME'] = './pretrained_models'
 
 AUDIOSET_MODEL_URL = 'https://www.dropbox.com/s/cv4knew8mvbrnvq/audioset_0.4593.pth?dl=1'
 CHECKPOINT_PATH = './pretrained_models/audio_mdl.pth'
-LABEL_PATH = './data/class_labels_indices.csv'
+LABEL_PATH = './metadata/class_labels_indices.csv'
 
 
 def make_features(wav_name, mel_bins, target_length=1024):
