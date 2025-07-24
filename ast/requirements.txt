@@ -1,1 +1,17 @@
-TODO: Add requirements.txt
+numpy==2.0.2
+scipy==1.15.3
+scikit-learn==1.6.1
+matplotlib==3.10.0
+
+numba==0.60.0
+llvmlite==0.43.0
+
+torch==2.6.0
+torchvision==0.21.0
+torchaudio==2.6.0
+
+timm==0.4.5        # repo expects this older API, keep it pinned
+wget               # latest is fine; the old 3.2 pin was breaking the build
+
+
+# TODO: pip freeze and copy everything here
