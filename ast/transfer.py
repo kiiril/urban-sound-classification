@@ -85,7 +85,7 @@ def run(mode='fixed_feature', num_of_epochs=5):
     print(f"\n*** {mode}  test accuracy: {test_acc:.3f} ***")
 
 if __name__ == '__main__':
-    # run(mode='fixed_feature')
+    run(mode='fixed_feature')
     run(mode='fine_tuning')
     
     
