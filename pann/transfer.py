@@ -183,6 +183,7 @@ def run(mode='fixed_feature', variant='Cnn14_16k', num_of_epochs=5):
 
 
 if __name__ == '__main__':
-    run(mode='fixed_feature')    
+    run(mode='fixed_feature')
+    run(mode='fine_tuning')   
 
         
