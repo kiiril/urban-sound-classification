@@ -50,12 +50,12 @@ def build_lists(root: str, folds):
     return files, labels
 
 def _tf_load_train(path, label):
-    wav = tf.numpy_function(lambda p: load_wav_16k(p.numpy().decode(), training=True), [path], tf.float32)
+    wav = tf.numpy_function(lambda p: load_wav_16k(p.decode(), training=True), [path], tf.float32)
     wav.set_shape([TARGET_LENGTH_SAMPLES])  # Fixed shape now
     return wav, label
 
 def _tf_load_eval(path, label):
-    wav = tf.numpy_function(lambda p: load_wav_16k(p.numpy().decode(), training=False), [path], tf.float32)
+    wav = tf.numpy_function(lambda p: load_wav_16k(p.decode(), training=False), [path], tf.float32)
     wav.set_shape([TARGET_LENGTH_SAMPLES])  # Fixed shape now
     return wav, label
 

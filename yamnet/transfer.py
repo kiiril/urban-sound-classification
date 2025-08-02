@@ -4,12 +4,14 @@ import features as features_lib
 import params as yamnet_params
 from yamnet import yamnet, yamnet_frames_model
 from dataset import build_lists, make_dataset
+import matplotlib.pyplot as plt
 
 class Transfer(Model):
     def __init__(self, num_classes: int,
                  backbone_trainable: bool,
                  base_lr: float = 1e-4,
-                 head_lr: float = 5e-4):
+                 head_lr: float = 5e-4,
+                 dropout_rate: float = 0.3):
         super().__init__()
         self.params = yamnet_params.Params()
         # Important: keep num_classes at the original 521 *inside the base* to load weights.
@@ -19,7 +21,7 @@ class Transfer(Model):
         self.base.trainable = backbone_trainable
 
         # New transfer head on top of embeddings (1024 -> num_classes)
-        self.dropout = layers.Dropout(0.2)
+        self.dropout = layers.Dropout(dropout_rate)
         self.head = layers.Dense(num_classes, name="transfer_head")
 
         # learning rates for param groups
@@ -179,7 +181,7 @@ def load_base_weights(model: Transfer, weights_path: str):
     ckpt.restore(weights_path).expect_partial()
     
 
-def run(mode='fixed_feature', num_of_epochs=5):
+def run(mode='fixed_feature', num_of_epochs=5, patience=3):
     train_files, train_labels = build_lists('../datasets', folds=range(1, 9))
     val_files,   val_labels   = build_lists('../datasets', folds=[9])
     test_files,  test_labels  = build_lists('../datasets', folds=[10])
@@ -190,26 +192,26 @@ def run(mode='fixed_feature', num_of_epochs=5):
     
     if mode == "fixed_feature":
         model = Transfer(num_classes=10, backbone_trainable=False)
-        model.compile(loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True))
     elif mode == "fine_tuning":
         model = Transfer(num_classes=10, backbone_trainable=True,
                                base_lr=1e-4, head_lr=5e-4)
-        model.compile(loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True))
     else:
         raise ValueError("mode must be 'fixed_feature' or 'fine_tuning'.")
     
     load_base_weights(model, 'yamnet.h5')
     
-    model.compile(run_eagerly=False)
+    model.compile(loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
+                  metrics=['acc']) # It's good practice to specify metrics here
     
     callbacks = [
         DualLRPlateau(model, monitor="val_loss", factor=0.5, patience=2, min_lr=1e-6),
-        KC.EarlyStopping(monitor="val_loss", patience=6, restore_best_weights=True),
+        KC.EarlyStopping(monitor="val_loss", patience=patience, restore_best_weights=True),
         KC.ModelCheckpoint(
         f"yamnet_{mode}_best.weights.h5",
-        monitor="val_acc",
+        monitor="val_loss",
         save_best_only=True,
         save_weights_only=True,
+        mode='min'
         ),
     ]
     
@@ -218,14 +220,46 @@ def run(mode='fixed_feature', num_of_epochs=5):
     history = model.fit(train_ds, validation_data=val_ds,
                         epochs=num_of_epochs, callbacks=callbacks)
     
+    # 3. Add plotting right after training using the history object
+    plt.figure(figsize=(14, 6))
+
+    # Plot Loss
+    plt.subplot(1, 2, 1)
+    plt.plot(history.history['loss'], label='Training Loss')
+    plt.plot(history.history['val_loss'], label='Validation Loss')
+    plt.title(f'YAMNet ({mode}) Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.grid(True)
+
+    # Plot Accuracy
+    plt.subplot(1, 2, 2)
+    plt.plot(history.history['acc'], label='Training Accuracy')
+    plt.plot(history.history['val_acc'], label='Validation Accuracy')
+    plt.title(f'YAMNet ({mode}) Accuracy')
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy')
+    plt.legend()
+    plt.grid(True)
+
+    plt.tight_layout()
+    output_filename = f'yamnet_{mode}_training_plot.png'
+    plt.savefig(output_filename)
+    print(f"\nPlot saved to {output_filename}")
+    plt.close()
+
+    # Because restore_best_weights=True, the model already has the best weights.
+    # The load_weights line is technically redundant but confirms the saved file is used.
     model.load_weights(f"yamnet_{mode}_best.weights.h5")
     
+    print("\nEvaluating with best model weights...")
     test_metrics = model.evaluate(test_ds, return_dict=True)
-    print(f"*** {mode} test: acc={test_metrics['acc']:.3f} loss={test_metrics['loss']:.4f}")
+    print(f"*** {mode} test: acc={test_metrics['acc']:.3f} loss={test_metrics['loss']:.4f} ***")
     
 
 if __name__ == '__main__':
-    # run(mode='fixed_feature', num_of_epochs=2)
-    run(mode='fine_tuning', num_of_epochs=5)
+    run(mode='fixed_feature', num_of_epochs=3)
+    run(mode='fine_tuning', num_of_epochs=3)
     
     

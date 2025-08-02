@@ -2,9 +2,23 @@ from dataset import UrbanSound8K
 from model import ASTModel
 import torch, torch.nn as nn
 from torch.utils.data import DataLoader
+import matplotlib.pyplot as plt
 
-def load_ast(num_classes, checkpoint_path, mode='fixed_feature'):
+def load_ast(num_classes, checkpoint_path, mode='fixed_feature', dropout_rate=0.3):
     ast = ASTModel(label_dim=num_classes, input_tdim=512, imagenet_pretrain=True, audioset_pretrain=True)
+    
+    # Adding Dropout layer to avoid overfitting
+    original_layernorm = ast.mlp_head[0]
+    original_linear = ast.mlp_head[1]
+    
+    in_features = original_linear.in_features
+    
+    ast.mlp_head = nn.Sequential(
+        original_layernorm,
+        nn.Dropout(p=dropout_rate),
+        nn.Linear(in_features, num_classes)
+    )
+    
     checkpoint = torch.load(checkpoint_path, map_location='cuda')
     ast.load_state_dict(checkpoint, strict=False)
     
@@ -27,7 +41,7 @@ def load_ast(num_classes, checkpoint_path, mode='fixed_feature'):
     return ast, param_groups
 
 
-def run(mode='fixed_feature', num_of_epochs=5):
+def run(mode='fixed_feature', num_of_epochs=5, patience=3):
     use_cuda = torch.cuda.is_available()
     device = torch.device('cuda' if use_cuda else 'cpu')
     
@@ -70,23 +84,75 @@ def run(mode='fixed_feature', num_of_epochs=5):
         return loss_sum / total, correct / total
     
     print('Training started')
-    best_val = 0.0
+    
+    # 2. Initialize lists to store metrics over epochs
+    history = {'train_loss': [], 'val_loss': [], 'train_acc': [], 'val_acc': []}
+    
+    # 3. Track best validation loss to save the best model
+    best_val_loss = float('inf')
+    early_stop_counter = 0
+    
     for epoch in range(1, num_of_epochs + 1):
         train_loss, train_acc = loop(train_loader, train=True)
         val_loss,   val_acc   = loop(val_loader,   train=False)
-        print(f"Epoch {epoch:02d}  train {train_acc:.3f}  val {val_acc:.3f}")
-        if val_acc > best_val:            # save best model
-            best_val = val_acc
+        
+        # Store metrics
+        history['train_loss'].append(train_loss)
+        history['val_loss'].append(val_loss)
+        history['train_acc'].append(train_acc)
+        history['val_acc'].append(val_acc)
+        
+        print(f"Epoch {epoch:02d} | Train Loss: {train_loss:.3f}, Acc: {train_acc:.3f} | Val Loss: {val_loss:.3f}, Acc: {val_acc:.3f}")
+        
+        # 4. Save model based on best validation LOSS
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
             torch.save(model.state_dict(), f"ast_{mode}_best.pth")
+            print(f"  -> New best model saved with validation loss: {best_val_loss:.3f}")
+            early_stop_counter = 0
+        else:
+            early_stop_counter += 1
             
-    # final test evaluation
+        if early_stop_counter >= patience:
+            print(f"\nEarly stopping triggered after {epoch} epochs.")
+            break
+            
+    # 5. Plotting the results after the training loop
+    epochs_range = range(1, num_of_epochs + 1)
+    plt.figure(figsize=(14, 6))
+
+    plt.subplot(1, 2, 1)
+    plt.plot(epochs_range, history['train_loss'], 'b-', label='Training Loss')
+    plt.plot(epochs_range, history['val_loss'], 'r-', label='Validation Loss')
+    plt.title('Training & Validation Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.grid(True) # Added grid for better readability
+
+    plt.subplot(1, 2, 2)
+    plt.plot(epochs_range, history['train_acc'], 'b-', label='Training Accuracy')
+    plt.plot(epochs_range, history['val_acc'], 'r-', label='Validation Accuracy')
+    plt.title('Training & Validation Accuracy')
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy')
+    plt.legend()
+    plt.grid(True) # Added grid for better readability
+
+    plt.tight_layout()
+    
+    output_filename = f'ast_{mode}_training_plot.png'
+    plt.savefig(output_filename)
+            
+    # Final test evaluation
+    print("\nLoading best model for final test evaluation...")
     model.load_state_dict(torch.load(f"ast_{mode}_best.pth"))
     test_loss, test_acc = loop(test_loader, train=False)
-    print(f"\n*** {mode}  test accuracy: {test_acc:.3f} ***")
+    print(f"\n*** {mode} test accuracy: {test_acc:.3f} (from model with val_loss: {best_val_loss:.3f}) ***")
 
 if __name__ == '__main__':
-    run(mode='fixed_feature')
-    run(mode='fine_tuning')
+    run(mode='fixed_feature', num_of_epochs=3)
+    run(mode='fine_tuning', num_of_epochs=3)
     
     
     

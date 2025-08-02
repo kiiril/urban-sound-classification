@@ -4,6 +4,7 @@ from models import Cnn14, Cnn14_16k, init_layer
 from dataset import UrbanSound8KWav
 from torch.utils.data import DataLoader
 import random
+import matplotlib.pyplot as plt
 
 class TransferCnn14(nn.Module):
     def __init__(self,
@@ -15,7 +16,8 @@ class TransferCnn14(nn.Module):
                  fmin: int,
                  fmax: int,
                  classes_num: int,
-                 freeze_base: bool):
+                 freeze_base: bool,
+                 dropout_rate: float = 0.3):
         super().__init__()
         audioset_classes = 527
 
@@ -25,7 +27,10 @@ class TransferCnn14(nn.Module):
                          classes_num=audioset_classes)
 
         # PANN embedding size is 2048 for Cnn14 / Cnn14_16k
-        self.fc_transfer = nn.Linear(2048, classes_num, bias=True)
+        self.fc_transfer = nn.Sequential(
+            nn.Dropout(p=dropout_rate),
+            nn.Linear(2048, classes_num, bias=True)
+        )
 
         if freeze_base:
             for p in self.base.parameters():
@@ -34,7 +39,7 @@ class TransferCnn14(nn.Module):
         self.init_weights()
         
     def init_weights(self):
-        init_layer(self.fc_transfer)
+        init_layer(self.fc_transfer[1])
         
     def load_from_pretrain(self, pretrained_checkpoint_path, map_location='cuda'):
         checkpoint = torch.load(pretrained_checkpoint_path, map_location=map_location)
@@ -52,7 +57,8 @@ class TransferCnn14(nn.Module):
 def load_pann(num_classes: int,
               checkpoint_path: str,
               mode: str = 'fixed_feature',
-              variant: str = 'Cnn14_16k'):
+              variant: str = 'Cnn14_16k',
+              dropout_rate: float = 0.3):
     
     if variant == 'Cnn14':
         sample_rate, window_size, hop_size, mel_bins, fmin, fmax = 32000, 1024, 320, 64, 50, 14000
@@ -67,7 +73,8 @@ def load_pann(num_classes: int,
         sample_rate=sample_rate, window_size=window_size, hop_size=hop_size,
         mel_bins=mel_bins, fmin=fmin, fmax=fmax,
         classes_num=num_classes,
-        freeze_base=freeze
+        freeze_base=freeze,
+        dropout_rate=dropout_rate
     )
     model.load_from_pretrain(checkpoint_path)
     
@@ -108,7 +115,7 @@ def make_collate_fixed(target_samples: int, train: bool):
     return collate
 
 
-def run(mode='fixed_feature', variant='Cnn14_16k', num_of_epochs=5):
+def run(mode='fixed_feature', variant='Cnn14_16k', num_of_epochs=5, patience=3):
     use_cuda = torch.cuda.is_available()
     device = torch.device('cuda' if use_cuda else 'cpu')
     
@@ -166,24 +173,73 @@ def run(mode='fixed_feature', variant='Cnn14_16k', num_of_epochs=5):
     
     print('Training started')
     
-    best_val = 0.0
+    history = {'train_loss': [], 'val_loss': [], 'train_acc': [], 'val_acc': []}
+    best_val_loss = float('inf')
     best_path = f"pann_{variant}_{mode}_best.pth"
+    early_stop_counter = 0
     
     for epoch in range(1, num_of_epochs + 1):
         train_loss, train_acc = loop(model, train_loader, optimizer, criterion)
         val_loss, val_acc = loop(model, val_loader, None, criterion)
-        print(f"Epoch {epoch:02d}  train {train_acc:.3f}  val {val_acc:.3f}")
-        if val_acc > best_val:
-            best_val = val_acc
+        
+        # 3. Store metrics for each epoch
+        history['train_loss'].append(train_loss)
+        history['val_loss'].append(val_loss)
+        history['train_acc'].append(train_acc)
+        history['val_acc'].append(val_acc)
+        
+        print(f"Epoch {epoch:02d} | Train Loss: {train_loss:.3f}, Acc: {train_acc:.3f} | Val Loss: {val_loss:.3f}, Acc: {val_acc:.3f}")
+        
+        # 4. Save model based on best validation LOSS
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
             torch.save(model.state_dict(), best_path)
+            print(f"  -> New best model saved with validation loss: {best_val_loss:.3f}")
+            early_stop_counter = 0
+        else:
+            early_stop_counter += 1
             
+        if early_stop_counter >= patience:
+            print(f"\nEarly stopping triggered after {epoch} epochs.")
+            break
+            
+    # 5. Plotting the results and saving to a file
+    epochs_range = range(1, num_of_epochs + 1)
+    plt.figure(figsize=(14, 6))
+
+    plt.subplot(1, 2, 1)
+    plt.plot(epochs_range, history['train_loss'], 'b-', label='Training Loss')
+    plt.plot(epochs_range, history['val_loss'], 'r-', label='Validation Loss')
+    plt.title(f'PANN ({variant}) Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.grid(True)
+
+    plt.subplot(1, 2, 2)
+    plt.plot(epochs_range, history['train_acc'], 'b-', label='Training Accuracy')
+    plt.plot(epochs_range, history['val_acc'], 'r-', label='Validation Accuracy')
+    plt.title(f'PANN ({variant}) Accuracy')
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy')
+    plt.legend()
+    plt.grid(True)
+
+    plt.tight_layout()
+    output_filename = f'pann_{variant}_{mode}_training_plot.png'
+    plt.savefig(output_filename)
+    print(f"\nPlot saved to {output_filename}")
+    plt.close()
+            
+    # 6. Load best model and run final test evaluation
+    print("\nLoading best model for final test evaluation...")
     model.load_state_dict(torch.load(best_path, map_location=device))
     test_loss, test_acc = loop(model, test_loader, None, criterion)
-    print(f"\n*** {variant} | {mode} | test acc: {test_acc:.3f} ***")
+    print(f"\n*** {variant} | {mode} | test acc: {test_acc:.3f} (from model with val_loss: {best_val_loss:.3f}) ***")
 
 
 if __name__ == '__main__':
-    run(mode='fixed_feature')
-    run(mode='fine_tuning')   
+    run(mode='fixed_feature', num_of_epochs=3)
+    run(mode='fine_tuning', num_of_epochs=3)   
 
         
