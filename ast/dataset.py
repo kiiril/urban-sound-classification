@@ -1,7 +1,7 @@
 from torch.utils.data import Dataset
 from pathlib import Path
 import pandas as pd
-import torch, torchaudio
+import torch, torchaudio, torchaudio.transforms as T
 
 class UrbanSound8K(Dataset):
     def __init__(self, root, folds):
@@ -19,10 +19,17 @@ class UrbanSound8K(Dataset):
         
 
 def wav_to_fbank(wav_name, mel_bins=128, target_length=512):
-    waveform, sr = torchaudio.load(wav_name)
+    waveform, orig_sr = torchaudio.load(wav_name)
+    
+    target_sr = 16000
+    
+    resampler = T.Resample(orig_freq=orig_sr, new_freq=target_sr)
+    
+    if orig_sr != target_sr:
+        waveform = resampler(waveform)
 
     fbank = torchaudio.compliance.kaldi.fbank(
-        waveform, htk_compat=True, sample_frequency=sr, use_energy=False,
+        waveform, htk_compat=True, sample_frequency=target_sr, use_energy=False,
         window_type='hanning', num_mel_bins=mel_bins, dither=0.0,
         frame_shift=10)
 
