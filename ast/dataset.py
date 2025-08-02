@@ -3,6 +3,25 @@ from pathlib import Path
 import pandas as pd
 import torch, torchaudio, torchaudio.transforms as T
 
+SAMPLE_RATE = 16000
+TARGET_LENGTH_SECONDS = 4.0
+TARGET_LENGTH_SAMPLES = int(SAMPLE_RATE * TARGET_LENGTH_SECONDS)  # 64,000 samples
+
+def standardize_audio_length(waveform, target_samples, training=True):
+    """Standardize audio length with random crop for training, center crop for eval."""
+    if waveform.shape[1] <= target_samples:
+        # Pad with zeros if shorter
+        pad_length = target_samples - waveform.shape[1]
+        return torch.nn.functional.pad(waveform, (0, pad_length), mode='constant', value=0.0)
+    
+    else:
+        if training:
+            max_start = waveform.shape[1] - target_samples
+            start_idx = torch.randint(0, max_start + 1, (1,)).item()
+        else:
+            start_idx = (waveform.shape[1] - target_samples) // 2
+        return waveform[:, start_idx:start_idx + target_samples]
+
 class UrbanSound8K(Dataset):
     def __init__(self, root, folds):
         root = Path(root)
