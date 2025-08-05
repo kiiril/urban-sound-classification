@@ -26,11 +26,8 @@ class TransferCnn14(nn.Module):
                          hop_size=hop_size, mel_bins=mel_bins, fmin=fmin, fmax=fmax,
                          classes_num=audioset_classes)
 
-        # PANN embedding size is 2048 for Cnn14 / Cnn14_16k
-        self.fc_transfer = nn.Sequential(
-            nn.Dropout(p=dropout_rate),
-            nn.Linear(2048, classes_num, bias=True)
-        )
+        # no Dropout layer, since implemented in the base model
+        self.fc_transfer = nn.Linear(2048, classes_num, bias=True)
 
         if freeze_base:
             for p in self.base.parameters():
