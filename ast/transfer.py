@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 
 def load_ast(num_classes, checkpoint_path, mode='fixed_feature', dropout_rate=0.3):
-    ast = ASTModel(label_dim=num_classes, input_tdim=512, imagenet_pretrain=True, audioset_pretrain=True)
+    ast = ASTModel(label_dim=num_classes, input_tdim=400, imagenet_pretrain=True, audioset_pretrain=True)
     
     # Adding Dropout layer to avoid overfitting
     original_layernorm = ast.mlp_head[0]
@@ -45,19 +45,19 @@ def run(mode='fixed_feature', num_of_epochs=5, patience=3):
     use_cuda = torch.cuda.is_available()
     device = torch.device('cuda' if use_cuda else 'cpu')
     
-    train_dataset = UrbanSound8K('../datasets', folds=range(1, 9))
-    val_dataset = UrbanSound8K('../datasets', folds=[9])
-    test_dataset = UrbanSound8K('../datasets', folds=[10])
+    train_dataset = UrbanSound8K('../datasets', folds=range(1, 9), training=True)
+    val_dataset = UrbanSound8K('../datasets', folds=[9], training=False)
+    test_dataset = UrbanSound8K('../datasets', folds=[10], training=False)
     
-    train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True, num_workers=4, pin_memory=True)
-    val_loader = DataLoader(val_dataset, batch_size=16, shuffle=False)
-    test_loader = DataLoader(test_dataset, batch_size=16, shuffle=False)
+    train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True, num_workers=2, pin_memory=True)
+    val_loader = DataLoader(val_dataset, batch_size=16, shuffle=False, num_workers=2, pin_memory=True)
+    test_loader = DataLoader(test_dataset, batch_size=16, shuffle=False, num_workers=2, pin_memory=True)
     
     checkpoint_path = 'pretrained_models/audio_mdl.pth'
     model, pg = load_ast(10, checkpoint_path, mode)
     model.to(device)
     
-    opt = torch.optim.AdamW(pg, weight_decay=1e-4)
+    opt = torch.optim.Adam(pg, weight_decay=1e-4)
     criterion = nn.CrossEntropyLoss()
     
     def loop(loader, train=False):

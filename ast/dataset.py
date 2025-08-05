@@ -23,21 +23,22 @@ def standardize_audio_length(waveform, target_samples, training=True):
         return waveform[:, start_idx:start_idx + target_samples]
 
 class UrbanSound8K(Dataset):
-    def __init__(self, root, folds):
+    def __init__(self, root, folds, training=True):
         root = Path(root)
         meta = pd.read_csv(root/'UrbanSound8K.csv')
         self.items = meta[meta.fold.isin(folds)][['slice_file_name','fold','classID']].values
         self.audio_root = root/'audio'
+        self.training = training
         
     def __len__(self): return len(self.items)
     
     def __getitem__(self, idx):
         file_name, fold, label = self.items[idx]
-        feat = wav_to_fbank(self.audio_root/f'fold{fold}'/file_name)
+        feat = wav_to_fbank(self.audio_root/f'fold{fold}'/file_name, training=self.training)
         return feat, label
         
 
-def wav_to_fbank(wav_name, mel_bins=128, target_length=512):
+def wav_to_fbank(wav_name, mel_bins=128, target_length=400, training=True):
     waveform, orig_sr = torchaudio.load(wav_name)
     
     target_sr = 16000
@@ -46,6 +47,8 @@ def wav_to_fbank(wav_name, mel_bins=128, target_length=512):
     
     if orig_sr != target_sr:
         waveform = resampler(waveform)
+
+    waveform = standardize_audio_length(waveform, TARGET_LENGTH_SAMPLES, training)
 
     fbank = torchaudio.compliance.kaldi.fbank(
         waveform, htk_compat=True, sample_frequency=target_sr, use_energy=False,

@@ -61,8 +61,8 @@ class Transfer(Model):
         super().compile(**kwargs)
         self.loss_fn = loss or tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
         # Use separate opt instances so we can set different learning rates.
-        self.base_opt = tf.keras.optimizers.Adam(self.base_lr)
-        self.head_opt = tf.keras.optimizers.Adam(self.head_lr)
+        self.base_opt = tf.keras.optimizers.Adam(self.base_lr, weight_decay=1e-4)
+        self.head_opt = tf.keras.optimizers.Adam(self.head_lr, weight_decay=1e-4)
         
     @property
     def metrics(self):
@@ -191,7 +191,7 @@ def run(mode='fixed_feature', num_of_epochs=5, patience=3):
     test_ds  = make_dataset(test_files,  test_labels,  16,  training=False)
     
     if mode == "fixed_feature":
-        model = Transfer(num_classes=10, backbone_trainable=False)
+        model = Transfer(num_classes=10, backbone_trainable=False, head_lr=1e-3)
     elif mode == "fine_tuning":
         model = Transfer(num_classes=10, backbone_trainable=True,
                                base_lr=1e-4, head_lr=5e-4)

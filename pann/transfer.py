@@ -94,7 +94,7 @@ def load_pann(num_classes: int,
     return model, param_groups, sample_rate
 
 
-def make_collate_fixed(target_samples: int, train: bool):
+def make_collate_fixed(target_samples: int, training: bool):
     def collate(batch):
         wavs, labels = zip(*batch)
         out = []
@@ -105,7 +105,7 @@ def make_collate_fixed(target_samples: int, train: bool):
                 pad[:n] = w
                 w = pad
             elif n > target_samples:
-                if train:
+                if training:
                     start = random.randint(0, n - target_samples)
                 else:
                     start = (n - target_samples) // 2
@@ -127,8 +127,8 @@ def run(mode='fixed_feature', variant='Cnn14_16k', num_of_epochs=5, patience=3):
     criterion = nn.CrossEntropyLoss()
     
     target_samples = int(target_sr * 4.0)   # 4 s for US8K
-    collate_train = make_collate_fixed(target_samples, train=True)
-    collate_eval  = make_collate_fixed(target_samples, train=False)
+    collate_train = make_collate_fixed(target_samples, training=True)
+    collate_eval  = make_collate_fixed(target_samples, training=False)
     
     train_dataset = UrbanSound8KWav('../datasets', folds=range(1, 9), target_sr=16000)
     val_dataset = UrbanSound8KWav('../datasets', folds=[9], target_sr=16000)
@@ -137,13 +137,13 @@ def run(mode='fixed_feature', variant='Cnn14_16k', num_of_epochs=5, patience=3):
     train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True,
                           num_workers=2, pin_memory=True, collate_fn=collate_train)
     val_loader   = DataLoader(val_dataset, batch_size=16, shuffle=False,
-                          num_workers=2, collate_fn=collate_eval)
+                          num_workers=2, pin_memory=True, collate_fn=collate_eval)
     test_loader  = DataLoader(test_dataset, batch_size=16, shuffle=False,
-                          num_workers=2, collate_fn=collate_eval)
+                          num_workers=2, pin_memory=True, collate_fn=collate_eval)
     
     def loop(model, loader, optimizer=None, criterion=None):
-        train = optimizer is not None
-        model.train(train)
+        training = optimizer is not None
+        model.train(training)
         total = correct = 0
         loss_sum = 0.0
 
@@ -151,13 +151,12 @@ def run(mode='fixed_feature', variant='Cnn14_16k', num_of_epochs=5, patience=3):
             wav = wav.to(device, non_blocking=True)
             y = y.to(device, non_blocking=True)
 
-            if train:
+            if training:
                 out = model(wav)
                 logits = out["logits"]
                 loss = criterion(logits, y)
                 optimizer.zero_grad()
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
                 optimizer.step()
             else:
                 with torch.no_grad():
