@@ -4,6 +4,8 @@ import pandas as pd
 import torch
 import librosa
 import numpy as np
+import torchaudio
+import torchaudio.transforms as T
 
 class UrbanSound8KWav(Dataset):
     def __init__(self, root, folds, target_sr=32000):
@@ -19,8 +21,15 @@ class UrbanSound8KWav(Dataset):
         file_name, fold, label = self.items[idx]
         path = self.audio_root/f'fold{fold}'/file_name
         
-        wav, sr = librosa.load(path, sr=self.target_sr, mono=True)
-        if wav.dtype != np.float32:
-            wav = wav.astype(np.float32)
+        waveform, orig_sr = torchaudio.load(str(path))
         
-        return torch.from_numpy(wav), int(label)
+        if waveform.shape[0] > 1:
+            waveform = torch.mean(waveform, dim=0, keepdim=True)
+        
+        if orig_sr != self.target_sr:
+            resampler = T.Resample(orig_freq=orig_sr, new_freq=self.target_sr)
+            waveform = resampler(waveform)
+        
+        waveform = waveform.squeeze(0).float()
+        
+        return waveform, int(label)
