@@ -329,6 +329,18 @@ def load_base_weights(model: Transfer, weights_path: str):
     
 
 def run(mode='fixed_feature', num_of_epochs=5, patience=3):
+    # Configure GPU usage
+    gpus = tf.config.experimental.list_physical_devices('GPU')
+    if gpus:
+        try:
+            for gpu in gpus:
+                tf.config.experimental.set_memory_growth(gpu, True)
+            print(f"✅ Using GPU: {len(gpus)} GPU(s) detected")
+        except RuntimeError as e:
+            print(f"❌ GPU error: {e}")
+    else:
+        print("⚠️  No GPU detected, using CPU")
+    
     train_files, train_labels = build_lists('../datasets', folds=range(1, 9))
     val_files,   val_labels   = build_lists('../datasets', folds=[9])
     test_files,  test_labels  = build_lists('../datasets', folds=[10])
@@ -347,6 +359,13 @@ def run(mode='fixed_feature', num_of_epochs=5, patience=3):
     
     load_base_weights(model, 'yamnet.h5')
     
+    # BUILD THE MODEL with a dummy input to initialize all layers
+    # Get a sample batch to build the model
+    for sample_wav, sample_labels in train_ds.take(1):
+        # This forward pass builds all layers
+        _ = model(sample_wav, training=False)
+        break
+    
     # Count trainable parameters
     trainable_params = count_trainable_parameters(model)
     print(f"Trainable parameters: {trainable_params:,}")
@@ -355,7 +374,7 @@ def run(mode='fixed_feature', num_of_epochs=5, patience=3):
                   metrics=['acc']) # It's good practice to specify metrics here
     
     callbacks = [
-        DualLRPlateau(model, monitor="val_loss", factor=0.5, patience=2, min_lr=1e-6),
+        # DualLRPlateau(model, monitor="val_loss", factor=0.5, patience=2, min_lr=1e-6),
         KC.EarlyStopping(monitor="val_loss", patience=patience, restore_best_weights=True),
         KC.ModelCheckpoint(
         f"yamnet_{mode}_best.weights.h5",
