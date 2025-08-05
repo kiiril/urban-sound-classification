@@ -36,7 +36,7 @@ class TransferCnn14(nn.Module):
         self.init_weights()
         
     def init_weights(self):
-        init_layer(self.fc_transfer[1])
+        init_layer(self.fc_transfer)
         
     def load_from_pretrain(self, pretrained_checkpoint_path, map_location='cuda'):
         checkpoint = torch.load(pretrained_checkpoint_path, map_location=map_location)
