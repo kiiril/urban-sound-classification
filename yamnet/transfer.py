@@ -122,9 +122,12 @@ def measure_inference_time(model, dataset, num_batches=10):
         
         # Time inference
         start_time = time.time()
-        _ = model(wav_batch, training=False)
+        
+        predictions = model(wav_batch, training=False)
+        
         if tf.config.list_physical_devices('GPU'):
-            tf.experimental.sync_devices()
+            predictions.numpy() # force CPU to await for GPU
+            
         end_time = time.time()
         
         batch_time = end_time - start_time
