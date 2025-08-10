@@ -2,7 +2,6 @@ from torch.utils.data import Dataset
 from pathlib import Path
 import pandas as pd
 import torch
-import librosa
 import numpy as np
 import torchaudio
 import torchaudio.transforms as T

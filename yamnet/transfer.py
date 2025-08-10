@@ -46,7 +46,7 @@ class Transfer(Model):
         """
         # per-example function: 1-D waveform -> [1024] embedding
         def per_example(w):
-            scores, embeddings, _ = self.base(w, training=training)   # embeddings: [Np, 1024]
+            scores, embeddings, _ = self.base(w, training=False)   # must be false to not update BatchNorm
             clip_emb = tf.reduce_mean(embeddings, axis=0)             # [1024]
             return clip_emb
 
@@ -123,6 +123,8 @@ def measure_inference_time(model, dataset, num_batches=10):
         # Time inference
         start_time = time.time()
         _ = model(wav_batch, training=False)
+        if tf.config.list_physical_devices('GPU'):
+            tf.experimental.sync_devices()
         end_time = time.time()
         
         batch_time = end_time - start_time
@@ -400,12 +402,13 @@ def run(mode='fixed_feature', num_of_epochs=5, patience=3):
     print(f"Total training time: {total_training_time:.1f} seconds ({total_training_time/60:.1f} minutes)")
     
     # 3. Add plotting right after training using the history object
+    epochs_range = range(1, len(history['train_loss']) + 1)
     plt.figure(figsize=(14, 6))
 
     # Plot Loss
     plt.subplot(1, 2, 1)
-    plt.plot(history.history['loss'], label='Training Loss')
-    plt.plot(history.history['val_loss'], label='Validation Loss')
+    plt.plot(epochs_range, history.history['loss'], label='Training Loss')
+    plt.plot(epochs_range, history.history['val_loss'], label='Validation Loss')
     plt.title(f'YAMNet ({mode}) Loss')
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
@@ -414,8 +417,8 @@ def run(mode='fixed_feature', num_of_epochs=5, patience=3):
 
     # Plot Accuracy
     plt.subplot(1, 2, 2)
-    plt.plot(history.history['acc'], label='Training Accuracy')
-    plt.plot(history.history['val_acc'], label='Validation Accuracy')
+    plt.plot(epochs_range, history.history['acc'], label='Training Accuracy')
+    plt.plot(epochs_range, history.history['val_acc'], label='Validation Accuracy')
     plt.title(f'YAMNet ({mode}) Accuracy')
     plt.xlabel('Epoch')
     plt.ylabel('Accuracy')
@@ -494,7 +497,7 @@ def run(mode='fixed_feature', num_of_epochs=5, patience=3):
     
 
 if __name__ == '__main__':
-    run(mode='fixed_feature', num_of_epochs=3)
-    run(mode='fine_tuning', num_of_epochs=3)
+    run(mode='fixed_feature', num_of_epochs=10)
+    run(mode='fine_tuning', num_of_epochs=20)
     
     

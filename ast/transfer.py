@@ -6,7 +6,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.metrics import precision_recall_fscore_support, confusion_matrix, classification_report
 import seaborn as sns
-import time
+import time, random
+
+import torchaudio
+from urban_audio_pipeline.pann.dataset import UrbanSound8KWav
 
 def load_ast(num_classes, checkpoint_path, mode='fixed_feature', dropout_rate=0.3):
     ast = ASTModel(label_dim=num_classes, input_tdim=400, imagenet_pretrain=True, audioset_pretrain=True)
@@ -44,6 +47,27 @@ def load_ast(num_classes, checkpoint_path, mode='fixed_feature', dropout_rate=0.
     
     return ast, param_groups
 
+# FIXME: part of the trick for inference measurements
+def make_collate_fixed(target_samples: int, training: bool):
+    def collate(batch):
+        wavs, labels = zip(*batch)
+        out = []
+        for w in wavs:
+            n = w.numel()
+            if n < target_samples:
+                pad = torch.zeros(target_samples, dtype=w.dtype)
+                pad[:n] = w
+                w = pad
+            elif n > target_samples:
+                if training:
+                    start = random.randint(0, n - target_samples)
+                else:
+                    start = (n - target_samples) // 2
+                w = w[start:start+target_samples]
+            out.append(w)
+        return torch.stack(out, 0), torch.tensor(labels, dtype=torch.long)
+    return collate
+
 
 def count_trainable_parameters(model):
     """Count number of trainable parameters"""
@@ -56,6 +80,33 @@ def measure_inference_time(model, loader, device, num_batches=10):
     times = []
     total_samples = 0
     
+    # FIX: this is just a trick, better to correct it!
+    # Helper function to process a BATCH of waveforms correctly
+    def extract_fbank_batch(waveforms, target_length=400):
+        fbanks = []
+        for wav in waveforms:
+            # Calculate fbank for a single waveform
+            fbank = torchaudio.compliance.kaldi.fbank(
+                wav.unsqueeze(0), htk_compat=True, sample_frequency=16000,
+                use_energy=False, window_type='hanning', num_mel_bins=128,
+                dither=0.0, frame_shift=10)
+
+            # Pad or truncate the fbank
+            n_frames = fbank.shape[0]
+            p = target_length - n_frames
+            if p > 0:
+                m = torch.nn.ZeroPad2d((0, 0, 0, p))
+                fbank = m(fbank)
+            elif p < 0:
+                fbank = fbank[0:target_length, :]
+
+            # Normalize and add to list
+            fbank = (fbank - (-4.2677393)) / (4.5689974 * 2)
+            fbanks.append(fbank)
+        
+        # Stack individual fbanks into a batch
+        return torch.stack(fbanks, dim=0)
+    
     with torch.no_grad():
         for i, (x, y) in enumerate(loader):
             if i >= num_batches:
@@ -66,7 +117,10 @@ def measure_inference_time(model, loader, device, num_batches=10):
             
             # Time inference
             start_time = time.time()
-            _ = model(x)
+            
+            # FIXME: part of the inference time measurement trick
+            fbank_batch = extract_fbank_batch(x)
+            _ = model(fbank_batch)
             if device.type == 'cuda':
                 torch.cuda.synchronize()
             end_time = time.time()
@@ -272,22 +326,22 @@ def run(mode='fixed_feature', num_of_epochs=5, patience=3):
     print(f"Total training time: {total_training_time:.1f} seconds ({total_training_time/60:.1f} minutes)")
             
     # 5. Plotting the results after the training loop
-    epochs_range = range(1, num_of_epochs + 1)
+    epochs_range = range(1, len(history['train_loss']) + 1)
     plt.figure(figsize=(14, 6))
 
     plt.subplot(1, 2, 1)
-    plt.plot(epochs_range, history['train_loss'], 'b-', label='Training Loss')
-    plt.plot(epochs_range, history['val_loss'], 'r-', label='Validation Loss')
-    plt.title('Training & Validation Loss')
+    plt.plot(epochs_range, history['train_loss'], label='Training Loss')
+    plt.plot(epochs_range, history['val_loss'], label='Validation Loss')
+    plt.title(f'AST ({mode}) Loss')
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
     plt.legend()
     plt.grid(True) # Added grid for better readability
 
     plt.subplot(1, 2, 2)
-    plt.plot(epochs_range, history['train_acc'], 'b-', label='Training Accuracy')
-    plt.plot(epochs_range, history['val_acc'], 'r-', label='Validation Accuracy')
-    plt.title('Training & Validation Accuracy')
+    plt.plot(epochs_range, history['train_acc'], label='Training Accuracy')
+    plt.plot(epochs_range, history['val_acc'], label='Validation Accuracy')
+    plt.title(f'AST ({mode}) Accuracy')
     plt.xlabel('Epoch')
     plt.ylabel('Accuracy')
     plt.legend()
@@ -303,8 +357,13 @@ def run(mode='fixed_feature', num_of_epochs=5, patience=3):
     print("\nLoading best model for final test evaluation...")
     model.load_state_dict(torch.load(f"ast_{mode}_best.pth"))
     
+    # FIXME: part of the trick with measuring inference
+    target_samples = int(16000 * 4.0)   # 4 s for US8K
+    collate_inf  = make_collate_fixed(target_samples, training=False)
+    inference_ds = UrbanSound8KWav('../datasets', folds=[10], target_sr=16000)
+    inference_loader = DataLoader(inference_ds, batch_size=16, shuffle=False, num_workers=2, pin_memory=True, collate_fn=collate_inf)
     # Measure inference time per sample
-    inference_time_per_sample = measure_inference_time(model, test_loader, device)
+    inference_time_per_sample = measure_inference_time(model, inference_loader, device)
     print(f"Inference time per sample: {inference_time_per_sample:.2f} ms")
     
     # COMPREHENSIVE EVALUATION
@@ -376,7 +435,7 @@ def run(mode='fixed_feature', num_of_epochs=5, patience=3):
 
 if __name__ == '__main__':
     run(mode='fixed_feature', num_of_epochs=10)
-    run(mode='fine_tuning', num_of_epochs=50)
+    run(mode='fine_tuning', num_of_epochs=20)
     
     
     

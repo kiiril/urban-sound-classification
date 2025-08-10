@@ -24,6 +24,7 @@ class TransferCnn14(nn.Module):
                  dropout_rate: float = 0.3):
         super().__init__()
         audioset_classes = 527
+        self.freeze_base = freeze_base
 
         Base = Cnn14 if base_model == 'Cnn14' else Cnn14_16k
         self.base = Base(sample_rate=sample_rate, window_size=window_size,
@@ -53,6 +54,16 @@ class TransferCnn14(nn.Module):
         logits = self.fc_transfer(emb)
         probs = torch.softmax(logits, dim=-1)
         return {"logits": logits, "probs": probs}
+    
+    def train(self, mode: bool = True):
+        super().train(mode)
+        
+        if mode and not self.freeze_base:
+            for module in self.base.modules():
+                if isinstance(module, nn.BatchNorm2d):
+                    module.eval()
+                    
+        return self
     
 
 def count_trainable_parameters(model):
@@ -356,22 +367,22 @@ def run(mode='fixed_feature', variant='Cnn14_16k', num_of_epochs=5, patience=3):
     print(f"Total training time: {total_training_time:.1f} seconds ({total_training_time/60:.1f} minutes)")
             
     # 5. Plotting the results and saving to a file
-    epochs_range = range(1, num_of_epochs + 1)
+    epochs_range = range(1, len(history['train_loss']) + 1)
     plt.figure(figsize=(14, 6))
 
     plt.subplot(1, 2, 1)
-    plt.plot(epochs_range, history['train_loss'], 'b-', label='Training Loss')
-    plt.plot(epochs_range, history['val_loss'], 'r-', label='Validation Loss')
-    plt.title(f'PANN ({variant}) Loss')
+    plt.plot(epochs_range, history['train_loss'], label='Training Loss')
+    plt.plot(epochs_range, history['val_loss'], label='Validation Loss')
+    plt.title(f'PANN ({mode}) Loss')
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
     plt.legend()
     plt.grid(True)
 
     plt.subplot(1, 2, 2)
-    plt.plot(epochs_range, history['train_acc'], 'b-', label='Training Accuracy')
-    plt.plot(epochs_range, history['val_acc'], 'r-', label='Validation Accuracy')
-    plt.title(f'PANN ({variant}) Accuracy')
+    plt.plot(epochs_range, history['train_acc'], label='Training Accuracy')
+    plt.plot(epochs_range, history['val_acc'], label='Validation Accuracy')
+    plt.title(f'PANN ({mode}) Accuracy')
     plt.xlabel('Epoch')
     plt.ylabel('Accuracy')
     plt.legend()
@@ -449,7 +460,7 @@ def run(mode='fixed_feature', variant='Cnn14_16k', num_of_epochs=5, patience=3):
 
 
 if __name__ == '__main__':
-    run(mode='fixed_feature', num_of_epochs=3)
-    run(mode='fine_tuning', num_of_epochs=3)   
+    run(mode='fixed_feature', num_of_epochs=10)
+    run(mode='fine_tuning', num_of_epochs=20)   
 
         
