@@ -402,7 +402,7 @@ def run(mode='fixed_feature', num_of_epochs=5, patience=3):
     print(f"Total training time: {total_training_time:.1f} seconds ({total_training_time/60:.1f} minutes)")
     
     # 3. Add plotting right after training using the history object
-    epochs_range = range(1, len(history['train_loss']) + 1)
+    epochs_range = range(1, len(history.history['loss']) + 1)
     plt.figure(figsize=(14, 6))
 
     # Plot Loss
