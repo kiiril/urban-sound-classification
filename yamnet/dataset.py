@@ -12,7 +12,6 @@ TARGET_LENGTH_SECONDS = 4.0
 TARGET_LENGTH_SAMPLES = int(SAMPLE_RATE * TARGET_LENGTH_SECONDS)  # 64,000 samples
 
 def standardize_audio_length(waveform, target_samples, training=True):
-    """Standardize audio length with random crop for training, center crop for eval."""
     n = len(waveform)
     if n <= target_samples:
         pad_length = target_samples - n

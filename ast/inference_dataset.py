@@ -1,5 +1,4 @@
 from pathlib import Path
-import sys
 import csv
 import os
 import wget
@@ -44,7 +43,7 @@ def load_label(label_csv):
         reader = csv.reader(f, delimiter=',')
         lines = list(reader)
     labels = []
-    ids = []  # Each label has a unique id such as "/m/068hy"
+    ids = []
     for i1 in range(1, len(lines)):
         id = lines[i1][1]
         label = lines[i1][2]
@@ -60,16 +59,14 @@ def main():
     parser.add_argument("--model_path", default=CHECKPOINT_PATH,
                         help="Checkpoint path (will auto-download if missing)")
     args = parser.parse_args()
-    
-    # ensure checkpoint
+
     checkpoint_path = args.model_path
     if not os.path.exists(checkpoint_path):
         os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
         print(f'[*INFO] downloading checkpoint to {checkpoint_path}')
         wget.download(AUDIOSET_MODEL_URL, out=checkpoint_path)
         print()
-        
-    # collect WAV files
+
     wav_files = sorted([str(p) for p in Path(args.data_dir).rglob("*.wav")])
     if not wav_files:
         print(f"No .wav files found in {args.data_dir}")

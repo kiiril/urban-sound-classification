@@ -45,7 +45,6 @@ class TransferCnn14(nn.Module):
         
     def load_from_pretrain(self, pretrained_checkpoint_path, map_location='cuda'):
         checkpoint = torch.load(pretrained_checkpoint_path, map_location=map_location)
-        # checkpoints have a 'model' key
         self.base.load_state_dict(checkpoint['model'], strict=False)
         
     def forward(self, x):
@@ -67,12 +66,10 @@ class TransferCnn14(nn.Module):
     
 
 def count_trainable_parameters(model):
-    """Count number of trainable parameters"""
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
     
 
 def measure_inference_time(model, loader, device, num_batches=10):
-    """Measure average inference time per sample"""
     model.eval()
     times = []
     total_samples = 0
@@ -84,8 +81,7 @@ def measure_inference_time(model, loader, device, num_batches=10):
                 
             wav = wav.to(device)
             batch_size = wav.size(0)
-            
-            # Time inference
+
             start_time = time.time()
             _ = model(wav)
             if device.type == 'cuda':
@@ -99,7 +95,7 @@ def measure_inference_time(model, loader, device, num_batches=10):
     total_inference_time = sum(times)
     avg_time_per_sample = total_inference_time / total_samples
     
-    return avg_time_per_sample * 1000  # Convert to milliseconds
+    return avg_time_per_sample * 1000
 
 
 def evaluate_with_metrics(model, loader, criterion, device, class_names=None):
@@ -112,7 +108,7 @@ def evaluate_with_metrics(model, loader, criterion, device, class_names=None):
         for wav, y in loader:
             wav, y = wav.to(device), y.to(device)
             out = model(wav)
-            logits = out["logits"]  # PANN returns dict with "logits" key
+            logits = out["logits"]
             loss = criterion(logits, y)
             
             loss_sum += loss.item() * y.size(0)
@@ -130,12 +126,12 @@ def evaluate_with_metrics(model, loader, criterion, device, class_names=None):
     all_preds = np.array(all_preds)
     all_labels = np.array(all_labels)
     
-    # Calculate precision, recall, F1-score
+    # calculate precision, recall, F1-score
     precision, recall, f1, support = precision_recall_fscore_support(
         all_labels, all_preds, average='macro', zero_division=0
     )
     
-    # Calculate per-class metrics
+    # calculate per-class metrics
     precision_per_class, recall_per_class, f1_per_class, support_per_class = precision_recall_fscore_support(
         all_labels, all_preds, average=None, zero_division=0
     )
@@ -161,9 +157,6 @@ def evaluate_with_metrics(model, loader, criterion, device, class_names=None):
 
 
 def plot_confusion_matrix(cm, class_names, title='Confusion Matrix', save_path=None):
-    """
-    Plot and save confusion matrix using seaborn
-    """
     plt.figure(figsize=(10, 8))
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
                 xticklabels=class_names, yticklabels=class_names)
@@ -180,9 +173,6 @@ def plot_confusion_matrix(cm, class_names, title='Confusion Matrix', save_path=N
 
 
 def print_detailed_metrics(metrics, class_names, dataset_name=""):
-    """
-    Print comprehensive evaluation metrics
-    """
     print(f"\n{'='*60}")
     print(f"DETAILED EVALUATION METRICS{' - ' + dataset_name if dataset_name else ''}")
     print(f"{'='*60}")
@@ -226,8 +216,7 @@ def load_pann(num_classes: int,
         dropout_rate=dropout_rate
     )
     model.load_from_pretrain(checkpoint_path)
-    
-    # Param groups—simple and non-overlapping
+
     if mode == "fixed_feature":
         param_groups = [
             {"params": model.fc_transfer.parameters(), "lr": 1e-3},
@@ -272,7 +261,7 @@ def run(mode='fixed_feature', variant='Cnn14_16k', num_of_epochs=5, patience=3):
     model, pg, target_sr = load_pann(10, checkpoint_path, mode, variant)
     model.to(device)
 
-    # Count trainable parameters
+    # count trainable parameters
     trainable_params = count_trainable_parameters(model)
     print(f"Trainable parameters: {trainable_params:,}")
     
@@ -293,8 +282,7 @@ def run(mode='fixed_feature', variant='Cnn14_16k', num_of_epochs=5, patience=3):
                           num_workers=2, pin_memory=True, collate_fn=collate_eval)
     test_loader  = DataLoader(test_dataset, batch_size=16, shuffle=False,
                           num_workers=2, pin_memory=True, collate_fn=collate_eval)
-    
-    # UrbanSound8K class names (same as AST)
+
     class_names = ['air_conditioner', 'car_horn', 'children_playing', 'dog_bark', 
                    'drilling', 'engine_idling', 'gun_shot', 'jackhammer', 
                    'siren', 'street_music']
@@ -340,16 +328,14 @@ def run(mode='fixed_feature', variant='Cnn14_16k', num_of_epochs=5, patience=3):
     for epoch in range(1, num_of_epochs + 1):
         train_loss, train_acc = loop(model, train_loader, optimizer, criterion)
         val_loss, val_acc = loop(model, val_loader, None, criterion)
-        
-        # 3. Store metrics for each epoch
+
         history['train_loss'].append(train_loss)
         history['val_loss'].append(val_loss)
         history['train_acc'].append(train_acc)
         history['val_acc'].append(val_acc)
         
         print(f"Epoch {epoch:02d} | Train Loss: {train_loss:.3f}, Acc: {train_acc:.3f} | Val Loss: {val_loss:.3f}, Acc: {val_acc:.3f}")
-        
-        # 4. Save model based on best validation LOSS
+
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             torch.save(model.state_dict(), best_path)
@@ -362,11 +348,10 @@ def run(mode='fixed_feature', variant='Cnn14_16k', num_of_epochs=5, patience=3):
             print(f"\nEarly stopping triggered after {epoch} epochs.")
             break
 
-    # Calculate total training time
+    # calculate total training time
     total_training_time = time.time() - training_start_time
     print(f"Total training time: {total_training_time:.1f} seconds ({total_training_time/60:.1f} minutes)")
-            
-    # 5. Plotting the results and saving to a file
+
     epochs_range = range(1, len(history['train_loss']) + 1)
     plt.figure(figsize=(14, 6))
 
@@ -393,25 +378,23 @@ def run(mode='fixed_feature', variant='Cnn14_16k', num_of_epochs=5, patience=3):
     plt.savefig(output_filename)
     print(f"Training plot saved to {output_filename}")
     plt.close()
-            
-    # 6. Load best model and run final test evaluation
+
     print("\nLoading best model for final test evaluation...")
     model.load_state_dict(torch.load(best_path, map_location=device))
 
-    # Measure inference time per sample
+    # measure inference time per sample
     inference_time_per_sample = measure_inference_time(model, test_loader, device)
     print(f"Inference time per sample: {inference_time_per_sample:.2f} ms")
 
-    # COMPREHENSIVE EVALUATION
     print("\n" + "="*80)
     print("COMPREHENSIVE MODEL EVALUATION")
     print("="*80)
 
-    # Test set evaluation  
+    # test set evaluation
     test_metrics = evaluate_with_metrics(model, test_loader, criterion, device, class_names)
     print_detailed_metrics(test_metrics, class_names, "TEST SET")
 
-    # Plot test confusion matrix
+    # plot test confusion matrix
     plot_confusion_matrix(
         test_metrics['confusion_matrix'], 
         class_names, 
@@ -419,7 +402,6 @@ def run(mode='fixed_feature', variant='Cnn14_16k', num_of_epochs=5, patience=3):
         save_path=f'pann_{variant}_{mode}_test_confusion_matrix.png'
     )
 
-    # Save detailed results to file
     results_file = f'pann_{variant}_{mode}_detailed_results.txt'
     with open(results_file, 'w') as f:
         f.write(f"PANN {variant} {mode.upper()} MODE - COMPREHENSIVE EVALUATION RESULTS\n")

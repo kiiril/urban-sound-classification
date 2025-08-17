@@ -18,13 +18,10 @@ class Transfer(Model):
                  dropout_rate: float = 0.3):
         super().__init__()
         self.params = yamnet_params.Params()
-        # Important: keep num_classes at the original 521 *inside the base* to load weights.
-        # The frames model builds logits with params.num_classes, but we will ignore those
-        # scores and only use embeddings. So leave params.num_classes = 521.
         self.base = yamnet_frames_model(self.params)
         self.base.trainable = backbone_trainable
 
-        # New transfer head on top of embeddings (1024 -> num_classes)
+        # new transfer head on top of embeddings (1024 -> num_classes)
         self.dropout = layers.Dropout(dropout_rate)
         self.head = layers.Dense(num_classes, name="transfer_head")
 
@@ -32,7 +29,6 @@ class Transfer(Model):
         self.base_lr = base_lr
         self.head_lr = head_lr
 
-        # will be set in compile()
         self.loss_fn = None
         self.base_opt = None
         self.head_opt = None
@@ -40,31 +36,25 @@ class Transfer(Model):
         self.loss_metric = tf.keras.metrics.Mean(name="loss")
         
     def call(self, wav, training=False):
-        """
-        wav: [B, T] float32 (padded per batch)
-        Returns: logits [B, num_classes]
-        """
-        # per-example function: 1-D waveform -> [1024] embedding
         def per_example(w):
             scores, embeddings, _ = self.base(w, training=False)   # must be false to not update BatchNorm
-            clip_emb = tf.reduce_mean(embeddings, axis=0)             # [1024]
+            clip_emb = tf.reduce_mean(embeddings, axis=0)
             return clip_emb
 
         clip_embs = tf.map_fn(
             per_example,
             wav,
             fn_output_signature=tf.TensorSpec(shape=(1024,), dtype=tf.float32)
-        )  # [B, 1024]
+        )
 
         x = self.dropout(clip_embs, training=training)
-        logits = self.head(x)                                         # [B, C]
+        logits = self.head(x)
         return logits
     
     def compile(self, optimizer=None, loss=None, **kwargs):
-        # We ignore 'optimizer' argument and create two internal Adam optimizers.
         super().compile(**kwargs)
         self.loss_fn = loss or tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
-        # Use separate opt instances so we can set different learning rates.
+
         self.base_opt = tf.keras.optimizers.Adam(self.base_lr, weight_decay=1e-4)
         self.head_opt = tf.keras.optimizers.Adam(self.head_lr, weight_decay=1e-4)
         
@@ -79,11 +69,10 @@ class Transfer(Model):
             logits = self(wav, training=True)
             loss = self.loss_fn(y, logits)
 
-        # split variables once, directly from submodules
         base_vars = self.base.trainable_variables
         head_vars = self.head.trainable_variables + self.dropout.trainable_variables
 
-        if base_vars:  # fixed_feature mode will have base_vars = []
+        if base_vars:
             base_grads = tape.gradient(loss, base_vars)
             self.base_opt.apply_gradients(zip(base_grads, base_vars))
 
@@ -104,12 +93,10 @@ class Transfer(Model):
     
     
 def count_trainable_parameters(model):
-    """Count number of trainable parameters in TensorFlow model"""
     return sum([tf.size(var).numpy() for var in model.trainable_variables])
 
 
 def measure_inference_time(model, dataset, num_batches=10):
-    """Measure average inference time per sample for TensorFlow model"""
     times = []
     total_samples = 0
     
@@ -119,8 +106,7 @@ def measure_inference_time(model, dataset, num_batches=10):
             break
             
         batch_size = tf.shape(wav_batch)[0].numpy()
-        
-        # Time inference
+
         start_time = time.time()
         
         predictions = model(wav_batch, training=False)
@@ -138,29 +124,25 @@ def measure_inference_time(model, dataset, num_batches=10):
     total_inference_time = sum(times)
     avg_time_per_sample = total_inference_time / total_samples
     
-    return avg_time_per_sample * 1000  # Convert to milliseconds
+    return avg_time_per_sample * 1000
 
 
 def evaluate_with_metrics(model, dataset, class_names=None):
-    """Comprehensive evaluation function for TensorFlow model"""
     all_preds = []
     all_labels = []
     total_loss = 0.0
     total_samples = 0
-    
-    # Reset metrics
+
     model.loss_metric.reset_state()
     model.acc_metric.reset_state()
     
     for wav_batch, label_batch in dataset:
         logits = model(wav_batch, training=False)
         loss = model.loss_fn(label_batch, logits)
-        
-        # Update metrics
+
         model.loss_metric.update_state(loss)
         model.acc_metric.update_state(label_batch, logits)
-        
-        # Collect predictions and labels
+
         preds = tf.argmax(logits, axis=1).numpy()
         labels = label_batch.numpy()
         
@@ -170,19 +152,19 @@ def evaluate_with_metrics(model, dataset, class_names=None):
         total_loss += loss.numpy() * tf.shape(label_batch)[0].numpy()
         total_samples += tf.shape(label_batch)[0].numpy()
     
-    # Calculate accuracy and loss
+    # calculate accuracy and loss
     accuracy = model.acc_metric.result().numpy()
     avg_loss = total_loss / total_samples
     
     all_preds = np.array(all_preds)
     all_labels = np.array(all_labels)
     
-    # Calculate precision, recall, F1-score
+    # calculate precision, recall, F1-score
     precision, recall, f1, support = precision_recall_fscore_support(
         all_labels, all_preds, average='macro', zero_division=0
     )
     
-    # Calculate per-class metrics
+    # calculate per-class metrics
     precision_per_class, recall_per_class, f1_per_class, support_per_class = precision_recall_fscore_support(
         all_labels, all_preds, average=None, zero_division=0
     )
@@ -208,9 +190,6 @@ def evaluate_with_metrics(model, dataset, class_names=None):
 
 
 def plot_confusion_matrix(cm, class_names, title='Confusion Matrix', save_path=None):
-    """
-    Plot and save confusion matrix using seaborn
-    """
     plt.figure(figsize=(10, 8))
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
                 xticklabels=class_names, yticklabels=class_names)
@@ -227,9 +206,6 @@ def plot_confusion_matrix(cm, class_names, title='Confusion Matrix', save_path=N
 
 
 def print_detailed_metrics(metrics, class_names, dataset_name=""):
-    """
-    Print comprehensive evaluation metrics
-    """
     print(f"\n{'='*60}")
     print(f"DETAILED EVALUATION METRICS{' - ' + dataset_name if dataset_name else ''}")
     print(f"{'='*60}")
@@ -253,10 +229,8 @@ def print_detailed_metrics(metrics, class_names, dataset_name=""):
 def _get_lr(opt):
     lr = opt.learning_rate
     try:
-        # Variable / Tensor
         return float(tf.convert_to_tensor(lr).numpy())
     except Exception:
-        # schedule or python scalar
         if isinstance(lr, tf.keras.optimizers.schedules.LearningRateSchedule):
             return float(lr(0).numpy())
         return float(lr)
@@ -264,77 +238,23 @@ def _get_lr(opt):
 def _set_lr(opt, val: float):
     lr = opt.learning_rate
     try:
-        # Variable-like
         lr.assign(val)
     except Exception:
-        # Fallback to attribute set (works for python float or 'auto')
         opt.learning_rate = val
-
-class DualLRPlateau(KC.Callback):
-    def __init__(self, model, monitor="val_loss",
-                 factor=0.5, patience=2, min_lr=1e-6, cooldown=0):
-        super().__init__()
-        self.m = model
-        self.monitor = monitor
-        self.factor = float(factor)
-        self.patience = int(patience)
-        self.min_lr = float(min_lr)
-        self.cooldown = int(cooldown)
-        self.best = float("inf")
-        self.wait = 0
-        self.cool = 0
-
-    def on_epoch_end(self, epoch, logs=None):
-        logs = logs or {}
-        cur = logs.get(self.monitor)
-        if cur is None:
-            return
-
-        if cur < self.best - 1e-8:
-            self.best = float(cur)
-            self.wait = 0
-            return
-
-        if self.cool > 0:
-            self.cool -= 1
-            self.wait = 0
-            return
-
-        self.wait += 1
-        if self.wait >= self.patience:
-            for opt in (self.m.base_opt, self.m.head_opt):
-                if opt is None:
-                    continue
-                old = _get_lr(opt)
-                new = max(self.min_lr, old * self.factor)
-                _set_lr(opt, new)
-            self.wait = 0
-            self.cool = self.cooldown
-            b = _get_lr(self.m.base_opt)
-            h = _get_lr(self.m.head_opt)
-            print(f"\n[DualLRPlateau] epoch {epoch+1}: base_lr={b:.3e}, head_lr={h:.3e}")
     
     
 def load_base_weights(model: Transfer, weights_path: str):
-    """
-    Load pretrained YAMNet weights into model.base.
-    If you exported weights as a Keras .h5 for the frames model:
-        model.base.load_weights(weights_path)
-    If your weights are a TF checkpoint, use tf.train.Checkpoint.
-    """
-    # Try Keras weights first
     try:
         model.base.load_weights(weights_path)
         return
     except Exception:
         pass
-    # Checkpoint fallback
     ckpt = tf.train.Checkpoint(model=model.base)
     ckpt.restore(weights_path).expect_partial()
     
 
 def run(mode='fixed_feature', num_of_epochs=5, patience=3):
-    # Configure GPU usage
+    # configure GPU usage
     gpus = tf.config.experimental.list_physical_devices('GPU')
     if gpus:
         try:
@@ -364,22 +284,19 @@ def run(mode='fixed_feature', num_of_epochs=5, patience=3):
     
     load_base_weights(model, 'yamnet.h5')
     
-    # BUILD THE MODEL with a dummy input to initialize all layers
-    # Get a sample batch to build the model
+    # build the model with a dummy input to initialize all layers
     for sample_wav, sample_labels in train_ds.take(1):
-        # This forward pass builds all layers
         _ = model(sample_wav, training=False)
         break
     
-    # Count trainable parameters
+    # count trainable parameters
     trainable_params = count_trainable_parameters(model)
     print(f"Trainable parameters: {trainable_params:,}")
     
     model.compile(loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
-                  metrics=['acc']) # It's good practice to specify metrics here
+                  metrics=['acc'])
     
     callbacks = [
-        # DualLRPlateau(model, monitor="val_loss", factor=0.5, patience=2, min_lr=1e-6),
         KC.EarlyStopping(monitor="val_loss", patience=patience, restore_best_weights=True),
         KC.ModelCheckpoint(
         f"yamnet_{mode}_best.weights.h5",
@@ -400,11 +317,10 @@ def run(mode='fixed_feature', num_of_epochs=5, patience=3):
     history = model.fit(train_ds, validation_data=val_ds,
                         epochs=num_of_epochs, callbacks=callbacks)
     
-    # Calculate total training time
+    # calculate total training time
     total_training_time = time.time() - training_start_time
     print(f"Total training time: {total_training_time:.1f} seconds ({total_training_time/60:.1f} minutes)")
-    
-    # 3. Add plotting right after training using the history object
+
     epochs_range = range(1, len(history.history['loss']) + 1)
     plt.figure(figsize=(14, 6))
 
@@ -434,38 +350,33 @@ def run(mode='fixed_feature', num_of_epochs=5, patience=3):
     print(f"\nPlot saved to {output_filename}")
     plt.close()
 
-    # Because restore_best_weights=True, the model already has the best weights.
-    # The load_weights line is technically redundant but confirms the saved file is used.
     model.load_weights(f"yamnet_{mode}_best.weights.h5")
     
-    # Measure inference time per sample
+    # measure inference time per sample
     inference_time_per_sample = measure_inference_time(model, test_ds)
     print(f"Inference time per sample: {inference_time_per_sample:.2f} ms")
-    
-    # COMPREHENSIVE EVALUATION
+
     print("\n" + "="*80)
     print("COMPREHENSIVE MODEL EVALUATION")
     print("="*80)
     
-    # Test set evaluation  
+    # test set evaluation
     test_metrics = evaluate_with_metrics(model, test_ds, class_names)
     print_detailed_metrics(test_metrics, class_names, "TEST SET")
     
-    # Plot test confusion matrix
+    # plot test confusion matrix
     plot_confusion_matrix(
         test_metrics['confusion_matrix'], 
         class_names, 
         title=f'YAMNet {mode.title()} - Test Confusion Matrix',
         save_path=f'yamnet_{mode}_test_confusion_matrix.png'
     )
-    
-    # Save detailed results to file
+
     results_file = f'yamnet_{mode}_detailed_results.txt'
     with open(results_file, 'w') as f:
         f.write(f"YAMNET {mode.upper()} MODE - COMPREHENSIVE EVALUATION RESULTS\n")
         f.write("="*60 + "\n\n")
-        
-        # Add the 3 key metrics
+
         f.write("KEY PERFORMANCE METRICS:\n")
         f.write(f"Trainable Parameters: {trainable_params:,}\n")
         f.write(f"Total Training Time: {total_training_time/60:.1f} minutes\n")
@@ -487,8 +398,7 @@ def run(mode='fixed_feature', num_of_epochs=5, patience=3):
                    f"{test_metrics['support_per_class'][i]:<10}\n")
     
     print(f"\nDetailed results saved to {results_file}")
-    
-    # Final summary with the 3 key metrics
+
     print(f"\n*** YAMNet {mode} FINAL RESULTS ***")
     print(f"Trainable parameters: {trainable_params:,}")
     print(f"Total training time: {total_training_time/60:.1f} minutes")
